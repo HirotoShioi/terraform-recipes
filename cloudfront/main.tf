@@ -17,9 +17,8 @@ provider "aws" {
 }
 
 locals {
-  project_name = "hiroto-terraform-test"
+  project_name = "expowallet-miniapp-example"
   origin_id    = "S3Origin"
-  notfound     = "notfound.json"
 }
 
 resource "random_id" "random_id" {
@@ -30,13 +29,12 @@ resource "aws_s3_bucket" "bucket" {
   bucket = "${local.project_name}-${random_id.random_id.hex}"
 }
 
-resource "aws_s3_object" "notfound" {
-  bucket = aws_s3_bucket.bucket.id
-  key    = local.notfound
-  content = jsonencode({
-    message = "Not Found"
-  })
-  content_type = "application/json"
+resource "aws_cloudfront_function" "this" {
+  name    = "${local.project_name}-function"
+  runtime = "cloudfront-js-1.0"
+  comment = "my function"
+  publish = true
+  code    = file("${path.module}/index.js")
 }
 
 resource "aws_cloudfront_distribution" "distribution" {
@@ -57,11 +55,9 @@ resource "aws_cloudfront_distribution" "distribution" {
     cached_methods   = ["GET", "HEAD"]
     target_origin_id = local.origin_id
 
-    forwarded_values {
-      query_string = false
-      cookies {
-        forward = "none"
-      }
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.this.arn
     }
 
     viewer_protocol_policy = "redirect-to-https"
@@ -81,23 +77,23 @@ resource "aws_cloudfront_distribution" "distribution" {
   }
 
   custom_error_response {
-    error_code            = 403
-    response_code         = 404
-    response_page_path    = "/${local.notfound}"
+    error_code            = 404
+    response_code         = 200
+    response_page_path    = "/index.html"
     error_caching_min_ttl = 300
   }
 }
 
 resource "aws_cloudfront_origin_access_identity" "origin_access_identity" {
-  comment = "My CloudFront Origin Access Identity"
+  comment = "CloudFront Origin Access Identity for ${local.project_name}"
 }
 
 data "aws_iam_policy_document" "policy_for_cloudfront" {
   statement {
     sid = "AllowCloudFrontServicePrincipal"
 
-    actions   = ["s3:GetObject"]
-    resources = ["${aws_s3_bucket.bucket.arn}/*"]
+    actions   = ["s3:GetObject", "s3:ListBucket"]
+    resources = ["${aws_s3_bucket.bucket.arn}", "${aws_s3_bucket.bucket.arn}/*"]
 
     principals {
       type        = "AWS"
@@ -111,17 +107,17 @@ resource "aws_s3_bucket_policy" "bucket_policy" {
   policy = data.aws_iam_policy_document.policy_for_cloudfront.json
 }
 
-resource "aws_s3_bucket_cors_configuration" "bucket_cors" {
-  bucket = aws_s3_bucket.bucket.id
+# resource "aws_s3_bucket_cors_configuration" "bucket_cors" {
+#   bucket = aws_s3_bucket.bucket.id
 
-  cors_rule {
-    allowed_headers = []
-    expose_headers  = []
-    allowed_methods = ["GET"]
-    allowed_origins = ["*"]
-    max_age_seconds = 3000
-  }
-}
+#   cors_rule {
+#     allowed_headers = []
+#     expose_headers  = []
+#     allowed_methods = ["GET"]
+#     allowed_origins = ["*"]
+#     max_age_seconds = 3000
+#   }
+# }
 
 output "cloudfront_url" {
   value = aws_cloudfront_distribution.distribution.domain_name
